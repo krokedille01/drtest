@@ -139,12 +139,13 @@
 
     <!-- Load Ethers.js from cdnjs.com -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-    <!-- Load WalletConnect V1 Provider from CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js"></script>
-    <!-- Load QRCode.js for generating QR codes -->
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <!-- Load Web3Modal (WalletConnect V2) as an ES Module -->
+    <script type="module">
+        import { Web3Modal } from "https://cdn.jsdelivr.net/npm/@web3modal/standalone@2.4.3/+esm";
+        window.Web3Modal = Web3Modal; // Make Web3Modal globally available for script.js
+    </script>
     
-    <!-- Your DApp's script.js (loaded as a regular script) -->
+    <!-- Your DApp's script.js -->
     <script src="./script.js"></script>
 </body>
 </html>
