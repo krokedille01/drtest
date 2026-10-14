@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>USDC Approval DApp</title>
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://assets.walletconnect.com https://explorer-api.walletconnect.com;">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -83,29 +82,6 @@
             display: block;
             margin-bottom: 5px;
         }
-        .button-group {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-top: 15px;
-        }
-        #qrcodeDisplay {
-            margin-top: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 15px;
-            border: 1px solid #eee;
-            border-radius: 8px;
-            background-color: #fefefe;
-        }
-        #qrcodeImage {
-            width: 250px;
-            height: 250px;
-            image-rendering: pixelated;
-            margin-bottom: 10px;
-        }
     </style>
 </head>
 <body>
@@ -114,16 +90,7 @@
         <p id="current-message">Please connect your wallet to approve USDC.</p>
         <div id="loader" class="loading hidden"></div>
         
-        <div class="button-group">
-            <button id="connectMetaMaskButton" class="action-button">Connect MetaMask</button>
-            <button id="connectMobileButton" class="action-button">Connect Mobile Wallet (QR)</button>
-        </div>
-
-        <div id="qrcodeDisplay" class="hidden">
-            <h3>Scan with Mobile Wallet</h3>
-            <img id="qrcodeImage" src="" alt="QR Code">
-            <p>Scan this code with your WalletConnect-compatible mobile wallet.</p>
-        </div>
+        <button id="connectWalletButton" class="action-button">Connect Wallet</button>
 
         <div id="walletInfo" class="wallet-info-card hidden">
             <strong>Connected Account:</strong> <span id="accountAddress"></span><br>
@@ -138,15 +105,12 @@
         </div>
     </div>
 
-    <!-- Load Ethers.js from cdnjs.com -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-    <!-- Load Web3Modal (WalletConnect V2) as an ES Module -->
-    <script type="module">
-        import { Web3Modal } from "https://cdn.jsdelivr.net/npm/@web3modal/standalone@latest/+esm";
-        window.Web3Modal = Web3Modal; // Make Web3Modal globally available for script.js
-    </script>
+    <!-- Load Ethers.js and Web3Modal from CDNs for global availability -->
+    <!-- Changed Ethers.js CDN to a UMD bundle -->
+    <script src="https://cdn.ethers.io/lib/ethers-6.7.0.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@web3modal/standalone@2.4.3/dist/index.umd.min.js"></script>
     
-    <!-- Your DApp's script.js -->
+    <!-- Your DApp's script.js (loaded as a regular script) -->
     <script src="./script.js"></script>
 </body>
 </html>
