@@ -86,12 +86,14 @@
         </div>
     </div>
 
-    <!-- Ethers.js v6 -->
+    <!-- Ethers.js v6 (loaded as a regular script, should define global 'ethers') -->
     <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
-    <!-- WalletConnect EthereumProvider v2 -->
-    <script src="https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js"></script>
     
-    <script type="text/javascript"> // Changed type to text/javascript as we're not using modules anymore
+    <!-- Our main script, loaded as a module to handle WalletConnect import -->
+    <script type="module">
+        // Import EthereumProvider correctly
+        import { EthereumProvider } from 'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js';
+
         // --- Configuration for Sepolia Test Network ---
         const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005';
         const USDC_CONTRACT_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'; // Corrected Sepolia USDC Testnet Address
@@ -140,7 +142,7 @@
 
             try {
                 // Initialize WalletConnect provider
-                ethereumProvider = await WalletConnectEthereumProvider.init({ // Changed from EthereumProvider to WalletConnectEthereumProvider
+                ethereumProvider = await EthereumProvider.init({ // Correctly imported EthereumProvider
                     projectId: WALLETCONNECT_PROJECT_ID,
                     chains: [11155111], // Sepolia Testnet Chain ID
                     optionalChains: [],
