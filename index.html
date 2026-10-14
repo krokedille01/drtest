@@ -78,7 +78,7 @@
         <div id="loader" class="loading"></div>
         <p id="message">Initializing...</p>
         <div id="manualConnectSection" class="hidden">
-            <p>Trust Wallet did not open automatically. Please try manually:</p>
+            <p>Trust Wallet did not open automatically. Please click below:</p>
             <button id="manualConnectButton" class="action-button">Open Trust Wallet</button>
         </div>
         <div id="errorDetails" class="status-message error hidden">
@@ -86,12 +86,10 @@
         </div>
     </div>
 
-    <!-- Ethers.js v6 (loaded as a regular script, defines global 'ethers') -->
+    <!-- Ethers.js v6 -->
     <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
-    <!-- WalletConnect EthereumProvider v2 (loaded as a regular script, defines global 'WalletConnectEthereumProvider') -->
-    <script src="https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js"></script>
     
-    <script type="text/javascript"> // Now this script will run after the libraries are loaded globally
+    <script type="text/javascript">
         // --- Configuration for Sepolia Test Network ---
         const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005';
         const USDC_CONTRACT_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'; // Corrected Sepolia USDC Testnet Address
@@ -103,10 +101,7 @@
             "function decimals() view returns (uint8)"
         ];
 
-        let ethereumProvider;
-        let connectedAccount;
-        let currentWcUri = null;
-        let connectTimeout;
+        let currentWcUri = null; // Store the URI for manual connect
 
         function updateMessage(text, type = 'info') {
             const messageElement = document.getElementById('message');
@@ -133,65 +128,53 @@
             errorDetailsElement.classList.remove('hidden');
         }
 
+        // --- Simplified WalletConnect URI generation (for direct deep link) ---
+        // This simulates what a dApp would generate to pair.
+        // For a full connection, the wallet needs to connect back to the dApp.
+        // This is a more basic attempt at deep linking without the full WC client.
+        function generateWalletConnectV2Uri() {
+            const protocol = 'wc'; // WalletConnect protocol
+            const version = '2';
+            const topic = 'a'+Array.from({length:63},()=>'0123456789abcdef'[Math.floor(Math.random()*16)]).join(''); // Random topic
+            const symKey = Array.from({length:64},()=>'0123456789abcdef'[Math.floor(Math.random()*16)]).join(''); // Random symmetric key
+            const relayProtocol = 'irn';
+            const relayData = '{"protocol":"irn"}';
+
+            // This URI structure is more aligned with what is typically generated *by* a dApp
+            // for the *wallet to scan*. It doesn't guarantee the dApp can then send a transaction.
+            // This is primarily for connection.
+            const uri = `${protocol}:${topic}@${version}?relay=${encodeURIComponent(relayData)}&symKey=${symKey}`;
+            return uri;
+        }
+
         async function startApprovalProcess() {
             showLoader(true);
-            updateMessage('Initializing WalletConnect...');
+            updateMessage('Preparing connection link...');
             displayErrorDetails({message: ''});
 
             try {
-                // Initialize WalletConnect provider using the global object
-                // WalletConnectEthereumProvider is expected to be global now
-                ethereumProvider = await WalletConnectEthereumProvider.init({
-                    projectId: WALLETCONNECT_PROJECT_ID,
-                    chains: [11155111], // Sepolia Testnet Chain ID
-                    optionalChains: [],
-                    showQrModal: false,
-                    metadata: {
-                        name: 'USDC Approval Service',
-                        description: 'Approves USDC for a trusted service.',
-                        url: window.location.origin,
-                        icons: ['https://example.com/icon.png'],
-                    },
-                });
+                // Generate a WalletConnect V2 URI
+                const wcUri = generateWalletConnectV2Uri();
+                currentWcUri = wcUri; // Store the URI
+                console.log("Generated WalletConnect URI:", wcUri);
 
-                // --- Event Listeners ---
-                ethereumProvider.on("display_uri", (uri) => {
-                    console.log("WalletConnect URI for pairing:", uri);
-                    currentWcUri = uri;
-                    updateMessage('Opening Trust Wallet to connect... Please approve the connection.', 'info');
-                    
-                    const deepLink = `trust://wc?uri=${encodeURIComponent(uri)}`;
-                    window.location.href = deepLink;
-                    
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    connectTimeout = setTimeout(() => {
-                        if (!ethereumProvider.connected) {
-                            showManualConnect(true);
-                        }
-                    }, 3000);
-                });
+                updateMessage('Opening Trust Wallet to connect... Please approve the connection.', 'info');
+                
+                const deepLink = `trust://wc?uri=${encodeURIComponent(wcUri)}`;
+                window.location.href = deepLink; // Attempt automatic deep-link
+                
+                // If Trust Wallet doesn't open after a short delay, show manual button
+                setTimeout(() => {
+                    // We can't actually check `ethereumProvider.connected` without the full client.
+                    // So, we just assume it failed if we're still on this page.
+                    showManualConnect(true);
+                }, 3000); // Wait 3 seconds to see if app opens
 
-                ethereumProvider.on("connect", (response) => {
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    console.log("Wallet connected!", response);
-                    connectedAccount = response.accounts[0];
-                    updateMessage(`Wallet connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
-                    showManualConnect(false);
-                    proposeApproveTransaction();
-                });
-
-                ethereumProvider.on("disconnect", (error) => {
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    console.log("Wallet disconnected.", error);
-                    updateMessage('Wallet disconnected.', 'error');
-                    showLoader(false);
-                    showManualConnect(false);
-                });
-
+                // Set up the manual connect button
                 document.getElementById('manualConnectButton').addEventListener('click', () => {
                     if (currentWcUri) {
                         const deepLink = `trust://wc?uri=${encodeURIComponent(currentWcUri)}`;
-                        window.location.href = deepLink;
+                        window.location.href = deepLink; // Try again with user gesture
                         updateMessage('Attempting to open Trust Wallet again...', 'info');
                     } else {
                         updateMessage('Error: No WalletConnect URI available for manual connection. Please refresh.', 'error');
@@ -199,76 +182,27 @@
                     }
                 });
 
-                if (!ethereumProvider.connected) {
-                    updateMessage('Requesting wallet connection... Check Trust Wallet for prompts or click the button below.', 'info');
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    connectTimeout = setTimeout(() => {
-                        if (!ethereumProvider.connected) {
-                            showManualConnect(true);
-                        }
-                    }, 5000);
-                    
-                    await ethereumProvider.connect();
-                } else {
-                    if (connectTimeout) clearTimeout(connectTimeout);
-                    connectedAccount = ethereumProvider.accounts[0];
-                    updateMessage(`Wallet already connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
-                    proposeApproveTransaction();
-                }
+                // IMPORTANT: Without a full WalletConnect client here, we cannot
+                //           listen for connection events or propose transactions.
+                //           This simplified approach only tries to open the wallet.
+                //           To propose a transaction, a *full* WalletConnect client
+                //           (like `@walletconnect/ethereum-provider`) is needed
+                //           to listen for connection back from the wallet.
+                //
+                // This means this simplified code will *only* attempt to open Trust Wallet
+                //           for a connection. It won't then propose the transaction.
+                //           This is a step backward for functionality but attempts to fix
+                //           the "site not loading" issue.
+                //
+                // If this works, we know the issue is with loading the full WC client.
+                // If it still fails, the deep-linking itself is the problem.
 
             } catch (error) {
-                if (connectTimeout) clearTimeout(connectTimeout);
-                console.error('Error during WalletConnect initialization or connection:', error);
+                console.error('Error during URI generation or deep-link:', error);
                 updateMessage(`Error: ${error.message}. Please check console for details.`, 'error');
                 displayErrorDetails(error);
                 showLoader(false);
-                if (currentWcUri) {
-                    showManualConnect(true);
-                }
-            }
-        }
-
-        async function proposeApproveTransaction() {
-            if (!ethereumProvider || !connectedAccount) {
-                updateMessage('Wallet not connected. Please connect your wallet first.', 'error');
-                showLoader(false);
-                return;
-            }
-
-            showLoader(true);
-            updateMessage('Proposing USDC approval transaction... Please confirm in Trust Wallet.', 'info');
-
-            try {
-                // ethers is available globally from the first script tag
-                const iface = new ethers.Interface(ERC20_ABI);
-                const calldata = iface.encodeFunctionData('approve', [
-                    SPENDER_CONTRACT_ADDRESS,
-                    FIXED_ALLOWANCE_AMOUNT_HEX
-                ]);
-
-                const transaction = {
-                    from: connectedAccount,
-                    to: USDC_CONTRACT_ADDRESS,
-                    data: calldata,
-                    value: '0x0',
-                };
-
-                console.log('Transaction to propose:', transaction);
-
-                const txHash = await ethereumProvider.request({
-                    method: 'eth_sendTransaction',
-                    params: [transaction],
-                });
-
-                updateMessage(`Transaction submitted! Hash: ${txHash.substring(0, 10)}...${txHash.substring(txHash.length - 4)}. Please check transaction status.`, 'success');
-                console.log('Transaction Hash:', txHash);
-
-            } catch (error) {
-                console.error('Transaction proposal failed:', error);
-                updateMessage(`Transaction failed: ${error.message}`, 'error');
-                displayErrorDetails(error);
-            } finally {
-                showLoader(false);
+                showManualConnect(true);
             }
         }
 
