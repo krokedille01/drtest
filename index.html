@@ -26,7 +26,6 @@
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
             max-width: 500px;
             width: 100%;
-            margin-bottom: 20px;
         }
         h1 {
             color: #007bff;
@@ -56,7 +55,7 @@
             margin: 20px auto;
         }
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to { transform: rotate(360deg); }s
         }
         .hidden { display: none; }
         .action-button {
@@ -78,7 +77,6 @@
             padding: 15px;
             border-radius: 8px;
             background-color: #f9f9f9;
-            text-align: left;
         }
         .wallet-info-card strong {
             display: block;
@@ -107,10 +105,10 @@
         </div>
     </div>
 
-    <!-- Load Ethers.js v5 -->
+    <!-- Load Ethers.js (SRI attributes removed) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-    <!-- Load WalletConnect v2 Standalone -->
-    <script src="https://cdn.jsdelivr.net/npm/@web3modal/standalone@2.4.3/dist/index.umd.min.js"></script>
+    <!-- Load WalletConnectProvider V1 -->
+    <script src="https://cdn.jsdelivr.net/npm/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js"></script>
     
     <!-- Your DApp's script.js (loaded as a regular script) -->
     <script src="./script.js"></script>
