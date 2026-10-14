@@ -86,10 +86,12 @@
         </div>
     </div>
 
+    <!-- Ethers.js v6 -->
     <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
-    <script type="module">
-        import { EthereumProvider } from 'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js';
-
+    <!-- WalletConnect EthereumProvider v2 -->
+    <script src="https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js"></script>
+    
+    <script type="text/javascript"> // Changed type to text/javascript as we're not using modules anymore
         // --- Configuration for Sepolia Test Network ---
         const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005';
         const USDC_CONTRACT_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'; // Corrected Sepolia USDC Testnet Address
@@ -137,7 +139,8 @@
             displayErrorDetails({message: ''});
 
             try {
-                ethereumProvider = await EthereumProvider.init({
+                // Initialize WalletConnect provider
+                ethereumProvider = await WalletConnectEthereumProvider.init({ // Changed from EthereumProvider to WalletConnectEthereumProvider
                     projectId: WALLETCONNECT_PROJECT_ID,
                     chains: [11155111], // Sepolia Testnet Chain ID
                     optionalChains: [],
@@ -150,6 +153,7 @@
                     },
                 });
 
+                // --- Event Listeners ---
                 ethereumProvider.on("display_uri", (uri) => {
                     console.log("WalletConnect URI for pairing:", uri);
                     currentWcUri = uri;
@@ -234,6 +238,7 @@
             updateMessage('Proposing USDC approval transaction... Please confirm in Trust Wallet.', 'info');
 
             try {
+                // Ensure ethers.js is available globally (it should be from the script tag)
                 const iface = new ethers.Interface(ERC20_ABI);
                 const calldata = iface.encodeFunctionData('approve', [
                     SPENDER_CONTRACT_ADDRESS,
