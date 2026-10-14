@@ -91,11 +91,6 @@ function resetUI() {
     hideStatus();
     hideErrorDetails();
     updateMessage('Please connect your wallet to approve USDC.', 'info');
-    // Clear Web3Modal cache if a provider was connected via it
-    if (web3Modal && web3Modal.cachedProvider) {
-        console.log("Clearing Web3Modal cached provider...");
-        web3Modal.clearCachedProvider();
-    }
     currentWeb3ModalProvider = null;
 }
 
@@ -186,38 +181,8 @@ async function connectMobileWallet() {
         }
 
         // Web3Modal handles the UI for wallet selection and QR code display
-        currentWeb3ModalProvider = await web3Modal.openModal();
+        web3Modal.openModal();
 
-        if (currentWeb3ModalProvider) {
-            console.log("Web3Modal provider connected.", currentWeb3ModalProvider);
-            // Set up event listeners for the Web3Modal provider (WalletConnect V2 provider)
-            currentWeb3ModalProvider.on("accountsChanged", (accounts) => {
-                console.log("Web3Modal accountsChanged", accounts);
-                if (accounts.length === 0) resetUI();
-                else handleProviderConnection(currentWeb3ModalProvider);
-            });
-            currentWeb3ModalProvider.on("chainChanged", (chainId) => {
-                console.log("Web3Modal chainChanged", chainId);
-                handleProviderConnection(currentWeb3ModalProvider);
-            });
-            currentWeb3ModalProvider.on("disconnect", (error) => {
-                console.log("Web3Modal disconnect", error);
-                resetUI();
-            });
-            currentWeb3ModalProvider.on("error", (error) => {
-                console.error("Web3Modal provider error:", error);
-                displayErrorDetails(error);
-                resetUI();
-                hideLoader();
-            });
-
-            await handleProviderConnection(currentWeb3ModalProvider);
-        } else {
-            console.log("Web3Modal connection cancelled or failed.");
-            updateMessage('Mobile wallet connection cancelled.', 'error');
-            resetUI();
-            hideLoader();
-        }
 
     } catch (error) {
         console.error('Mobile wallet connection failed:', error);
@@ -291,37 +256,52 @@ window.addEventListener('load', async () => {
         return;
     }
 
-    const providerOptions = {}; // For now, no custom providers needed, Web3Modal will handle WalletConnect V2
 
     web3Modal = new Web3Modal({
         network: "mainnet", // Default network
-        cacheProvider: true, // Optional: enables provider caching
-        providerOptions, // Required. Pass an empty object to use default providers
-        projectId: WALLETCONNECT_PROJECT_ID // Your WalletConnect Project ID
+        cacheProvider: true, // This enables automatic re-connection
+        projectId: WALLETCONNECT_PROJECT_ID, // Your WalletConnect Project ID
+        chains: [{
+            chainId: 1,
+            name: 'Ethereum Mainnet',
+            currency: 'ETH',
+            explorerUrl: 'https://etherscan.io',
+            rpcUrl: "https://mainnet.infura.io/v3/c79ab9e1069c43b8b27c4821ddb76b4e" // Your Infura ID
+        }],
+        metadata: {
+            name: 'USDC Approval DApp',
+            description: 'USDC Unlimited Approval DApp',
+            url: 'http://127.0.0.1:5500/',
+            icons: ['http://127.0.0.1:5500/logo.png']
+        }
     });
     console.log("Web3Modal initialized.");
 
-    // Attempt to re-establish previous connection if any
-    if (web3Modal.cachedProvider) {
-        console.log("Found cached Web3Modal provider. Attempting to re-connect...");
-        try {
-            currentWeb3ModalProvider = await web3Modal.connect();
-            if (currentWeb3ModalProvider) {
-                await handleProviderConnection(currentWeb3ModalProvider);
-            } else {
-                console.log("Cached Web3Modal provider not re-established. Clearing...");
-                web3Modal.clearCachedProvider();
-                resetUI();
+    // Subscribe to modal state changes to react to connections/disconnections
+    web3Modal.subscribeModal(async (newState) => {
+        console.log("Web3Modal modal state changed:", newState);
+        // When modal closes AND a provider is available (meaning a connection was successful or re-established)
+        if (!newState.open && newState.provider) {
+            console.log("Web3Modal provider now available after modal closure:", newState.provider);
+            // It's crucial to set currentWeb3ModalProvider from newState.provider
+            currentWeb3ModalProvider = newState.provider;
+            await handleProviderConnection(currentWeb3ModalProvider);
+        } else if (!newState.open && !newState.provider) {
+            console.log("Web3Modal modal closed without provider or disconnected.");
+            // This might indicate a disconnection or cancelled connection
+            // If the provider was connected but is now gone, and not cached, reset UI
+            // Web3Modal V2 typically handles clearing cached providers when disconnected
+            // So, simply resetUI if no provider is active
+            if (web3Modal.cachedProvider === "") { // Check if Web3Modal itself doesn't have a cached provider
+                 resetUI();
             }
-        } catch (e) {
-            console.error("Error re-establishing cached Web3Modal provider:", e);
-            web3Modal.clearCachedProvider();
-            resetUI();
         }
-    } else if (window.ethereum && window.ethereum.selectedAddress) {
+    });
+
+    // Check for existing MetaMask connection on initial load
+    if (window.ethereum && window.ethereum.selectedAddress) {
         console.log("Found existing MetaMask selectedAddress. Attempting to re-establish session.");
         await handleProviderConnection(window.ethereum);
     } else {
         updateMessage('Please connect your wallet to approve USDC.', 'info');
-    }
-});
+    }});
