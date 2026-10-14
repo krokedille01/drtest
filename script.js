@@ -181,6 +181,7 @@ async function connectMobileWallet() {
         }
 
         // Web3Modal handles the UI for wallet selection and QR code display
+        console.log("Web3Modal instance before openModal:", web3Modal);
         web3Modal.openModal();
 
 
@@ -261,6 +262,7 @@ window.addEventListener('load', async () => {
         network: "mainnet", // Default network
         cacheProvider: true, // This enables automatic re-connection
         projectId: WALLETCONNECT_PROJECT_ID, // Your WalletConnect Project ID
+        relayUrl: 'wss://relay.walletconnect.com', // Explicitly set WalletConnect V2 Relay URL
         chains: [{
             chainId: 1,
             name: 'Ethereum Mainnet',
@@ -276,6 +278,7 @@ window.addEventListener('load', async () => {
         }
     });
     console.log("Web3Modal initialized.");
+    console.log("Web3Modal instance:", web3Modal); // Added for debugging
 
     // Subscribe to modal state changes to react to connections/disconnections
     web3Modal.subscribeModal(async (newState) => {
